@@ -1,133 +1,177 @@
-"""ClubExpress ride scraper.
+"""ClubExpress scraper for West Chester Cycling Club.
 
-Uses Playwright for JavaScript-rendered pages. Falls back to requests
-if the target page is server-rendered.
+The public calendar is server-rendered HTML — no Playwright needed.
+Each event is an <a> tag whose `title` attribute contains the full
+description, including (sometimes) a RideWithGPS URL.
 
-TODO: Inspect your club's actual ClubExpress URL structure and update
-      `RIDES_PATH` and the CSS selectors in `_parse_ride_rows()`.
+Filtering rules applied here:
+  - Skip anything WITHOUT a ridewithgps.com URL in the description.
+  - Skip anything marked CANCELED or CANCELLED in the link text.
+
+Page:  https://wcccpa.clubexpress.com/content.aspx?page_id=4001&club_id=939827
+Event: https://wcccpa.clubexpress.com/content.aspx?page_id=4091&club_id=939827&item_id=XXXXXXX
 """
 
 import logging
 import os
-from contextlib import contextmanager
-from datetime import datetime
-from typing import Generator
+import re
+from datetime import datetime, timedelta
 
+import httpx
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright, Page
 
 log = logging.getLogger(__name__)
 
-# ── Adjust these to match your club's ClubExpress structure ──────────
-RIDES_PATH = "/events/event_list.asp"  # path to the public ride calendar
-ROW_SELECTOR = "table.eventList tr.eventRow"  # CSS selector for each ride row
-# ─────────────────────────────────────────────────────────────────────
+BASE_URL = "https://wcccpa.clubexpress.com"
+CALENDAR_PATH = "/content.aspx"
+CALENDAR_PARAMS = {"page_id": "4001", "club_id": "939827"}
+
+# Matches ridewithgps.com/routes/XXXXXXX or /trips/XXXXXXX
+RWGPS_URL_RE = re.compile(
+    r"https?://ridewithgps\.com/(routes|trips)/(\d+)", re.IGNORECASE
+)
+
+# Parses "Monday, April 06, 2026, 5:35 PM until 7:00 PM" from title attr
+DATE_RE = re.compile(
+    r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+"
+    r"(\w+ \d{1,2}, \d{4}),\s+(\d{1,2}:\d{2} [AP]M)",
+    re.IGNORECASE,
+)
+
+# Pace/category label e.g. "B+", "A-", "Super B", "Gravel B+"
+PACE_RE = re.compile(r"\b(Super B|Gravel B[+-]?|A[+-]?|B[+-]?|C[+-]?)\b")
 
 
 class ClubExpressScraper:
-    """Context manager wrapping a Playwright browser session."""
+    """Scrapes the WCCC ClubExpress calendar using plain HTTP (no browser needed)."""
 
     def __init__(self) -> None:
-        self.base_url = os.environ["CE_BASE_URL"].rstrip("/")
-        self.username = os.getenv("CE_USERNAME", "")
-        self.password = os.getenv("CE_PASSWORD", "")
-        self._pw = None
-        self._browser = None
+        self.base_url = os.getenv("CE_BASE_URL", BASE_URL).rstrip("/")
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            timeout=30,
+            headers={"User-Agent": "ClubRideAggregator/1.0"},
+            follow_redirects=True,
+        )
 
     def __enter__(self):
-        self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=True)
         return self
 
     def __exit__(self, *_):
-        if self._browser:
-            self._browser.close()
-        if self._pw:
-            self._pw.stop()
+        self._client.close()
 
     # ── Public API ───────────────────────────────────────────────────
 
     def fetch_rides(self, since: datetime) -> list[dict]:
-        """Return a list of raw ride dicts scraped from ClubExpress."""
-        page = self._browser.new_page()
-        try:
-            if self.username:
-                self._login(page)
-            url = f"{self.base_url}{RIDES_PATH}"
-            log.info("Fetching ride list from %s", url)
-            page.goto(url, wait_until="networkidle")
-            html = page.content()
-        finally:
-            page.close()
+        """Return structured ride dicts for rides on/after `since` that
+        have a RideWithGPS link and are not cancelled."""
+        html = self._fetch_calendar_html()
+        all_rides = self._parse_calendar(html)
 
-        return self._parse(html, since)
+        kept, skipped_date, skipped_no_rwgps, skipped_cancelled = [], 0, 0, 0
 
-    # ── Private helpers ──────────────────────────────────────────────
+        for ride in all_rides:
+            if ride["cancelled"]:
+                skipped_cancelled += 1
+            elif not ride["rwgps_id"]:
+                skipped_no_rwgps += 1
+            elif ride["date"] < since:
+                skipped_date += 1
+            else:
+                kept.append(ride)
 
-    def _login(self, page: Page) -> None:
-        """Log in to ClubExpress. Update selectors to match your site."""
-        login_url = f"{self.base_url}/login.asp"
-        log.info("Logging in as %s", self.username)
-        page.goto(login_url)
-        page.fill('input[name="username"]', self.username)
-        page.fill('input[name="password"]', self.password)
-        page.click('input[type="submit"]')
-        page.wait_for_load_state("networkidle")
+        log.info(
+            "Calendar: %d total events → %d kept, %d cancelled, "
+            "%d no RWGPS link, %d outside window",
+            len(all_rides), len(kept), skipped_cancelled,
+            skipped_no_rwgps, skipped_date,
+        )
+        return kept
 
-    def _parse(self, html: str, since: datetime) -> list[dict]:
-        """Parse the ride list HTML and return structured ride dicts.
+    # ── Private: fetch ───────────────────────────────────────────────
 
-        Update the selectors and field extraction to match your club's
-        actual ClubExpress page layout.
-        """
+    def _fetch_calendar_html(self) -> str:
+        resp = self._client.get(CALENDAR_PATH, params=CALENDAR_PARAMS)
+        resp.raise_for_status()
+        log.info("Fetched calendar (%d bytes)", len(resp.content))
+        return resp.text
+
+    # ── Private: parse ───────────────────────────────────────────────
+
+    def _parse_calendar(self, html: str) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
         rides = []
 
-        for row in soup.select(ROW_SELECTOR):
+        # Every calendar event links to page_id=4091
+        for link in soup.find_all("a", href=re.compile(r"page_id=4091")):
             try:
-                ride = self._parse_ride_row(row)
-                if ride and ride["date"] >= since:
+                ride = self._parse_event_link(link)
+                if ride:
                     rides.append(ride)
             except Exception as exc:
-                log.warning("Failed to parse row: %s", exc)
+                log.warning("Skipping event — parse error: %s", exc)
 
         return rides
 
-    def _parse_ride_row(self, row) -> dict | None:
-        """Extract fields from a single ride row.
+    def _parse_event_link(self, link) -> dict | None:
+        href = link.get("href", "")
+        title_attr = link.get("title", "")  # full description is here
+        link_text = link.get_text(strip=True)
 
-        TODO: Update these selectors to match your ClubExpress layout.
-        Common patterns:
-          - td.eventDate  → date string
-          - td.eventTitle → ride title + link to detail page
-          - td.eventLeader → ride leader name
-        """
-        cells = row.find_all("td")
-        if len(cells) < 3:
+        # Need a stable item_id
+        item_match = re.search(r"item_id=(\d+)", href)
+        if not item_match:
             return None
+        item_id = item_match.group(1)
 
-        date_str = cells[0].get_text(strip=True)
-        title_cell = cells[1]
-        title = title_cell.get_text(strip=True)
-        detail_url = title_cell.find("a", href=True)
-        leader = cells[2].get_text(strip=True) if len(cells) > 2 else ""
+        # Cancelled check — look in both the link text and the title attr
+        combined = f"{link_text} {title_attr}".upper()
+        cancelled = "CANCELED" in combined or "CANCELLED" in combined
 
+        # RideWithGPS link — look in title attribute (the description)
+        rwgps_match = RWGPS_URL_RE.search(title_attr)
+        rwgps_url = rwgps_match.group(0) if rwgps_match else None
+        rwgps_id = int(rwgps_match.group(2)) if rwgps_match else None
+
+        # Parse date/time from title attribute
+        date_match = DATE_RE.search(title_attr)
+        if not date_match:
+            return None
         try:
-            date = datetime.strptime(date_str, "%m/%d/%Y")  # adjust format as needed
+            ride_dt = datetime.strptime(
+                f"{date_match.group(1)} {date_match.group(2)}",
+                "%B %d, %Y %I:%M %p",
+            )
         except ValueError:
-            log.debug("Could not parse date: %s", date_str)
             return None
 
-        # Build a stable external ID from date + title slug
-        slug = title.lower().replace(" ", "-")[:40]
-        external_id = f"{date.strftime('%Y%m%d')}-{slug}"
+        # Description = everything after the datetime header
+        description = title_attr[date_match.end():].strip()
+        description = re.sub(r"^until \d{1,2}:\d{2} [AP]M\s*", "", description).strip()
+
+        # Pace category from link text
+        pace_match = PACE_RE.search(link_text)
+        pace = pace_match.group(0) if pace_match else ""
 
         return {
-            "id": external_id,
-            "title": title,
-            "date": date,
-            "leader": leader,
-            "detail_url": f"{self.base_url}{detail_url['href']}" if detail_url else None,
-            "description": "",   # populated by a detail-page fetch if needed
+            "id": f"wccc-{item_id}",
+            "item_id": item_id,
+            "title": link_text,
+            "date": ride_dt,
+            "pace": pace,
+            "description": description,
+            "detail_url": f"{self.base_url}{href}" if href.startswith("/") else href,
+            "rwgps_url": rwgps_url,
+            "rwgps_id": rwgps_id,
             "distance_km": None,
+            "cancelled": cancelled,
         }
+
+
+def fetch_week_of_rides(since: datetime | None = None) -> list[dict]:
+    """Convenience function used by the pipeline."""
+    if since is None:
+        lookback = int(os.getenv("CE_LOOKBACK_DAYS", "7"))
+        since = datetime.now() - timedelta(days=lookback)
+    with ClubExpressScraper() as scraper:
+        return scraper.fetch_rides(since=since)

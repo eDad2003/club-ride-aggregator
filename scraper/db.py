@@ -11,14 +11,14 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator
 
-from sqlalchemy import (
-    Column, String, Float, DateTime, Text, Integer, create_engine
-)
+from sqlalchemy import Column, String, Float, DateTime, Text, Integer, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/rides.db")
 
-engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL, echo=False, connect_args={"check_same_thread": False}
+)
 
 
 class Base(DeclarativeBase):
@@ -28,22 +28,24 @@ class Base(DeclarativeBase):
 class Ride(Base):
     __tablename__ = "rides"
 
-    external_id  = Column(String, primary_key=True)   # date + title slug
-    title        = Column(String, nullable=False)
-    ride_date    = Column(DateTime, nullable=False)
-    leader       = Column(String, default="")
-    distance_km  = Column(Float, nullable=True)
-    description  = Column(Text, default="")
-    scraped_at   = Column(DateTime, default=datetime.utcnow)
+    external_id = Column(String, primary_key=True)   # "wccc-{item_id}"
+    title       = Column(String, nullable=False)
+    ride_date   = Column(DateTime, nullable=False)
+    pace        = Column(String, default="")          # e.g. "B+", "A-"
+    distance_km = Column(Float, nullable=True)
+    description = Column(Text, default="")
+    rwgps_url   = Column(String, default="")          # direct URL if found
+    scraped_at  = Column(DateTime, default=datetime.utcnow)
 
     def to_dict(self) -> dict:
         return {
             "id": self.external_id,
             "title": self.title,
             "date": self.ride_date.isoformat() if self.ride_date else None,
-            "leader": self.leader,
+            "pace": self.pace,
             "distance_km": self.distance_km,
             "description": self.description,
+            "rwgps_url": self.rwgps_url,
         }
 
 
@@ -75,5 +77,4 @@ def get_session() -> Generator[Session, None, None]:
         yield session
 
 
-# Run init on import so both services can use the same schema
 init_db()
