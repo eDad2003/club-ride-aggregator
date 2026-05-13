@@ -1,10 +1,6 @@
-"""High-level pipeline: scrape → enrich → store.
+"""High-level pipeline: scrape → enrich → store."""
 
-For WCCC, most ride descriptions include a direct RideWithGPS URL so we
-can skip fuzzy matching entirely for those rides. The RouteMatcher is
-kept as a fallback for any rides that mention a route by name only.
-"""
-
+import json
 import logging
 from datetime import datetime, timedelta
 import os
@@ -23,7 +19,6 @@ def run_pipeline() -> None:
 
     log.info("Pipeline start — scraping rides since %s", since.date())
 
-    # Scraper already filters out cancelled rides and those without RWGPS links
     raw_rides = fetch_week_of_rides(since=since)
     log.info("Processing %d rides with RWGPS links", len(raw_rides))
 
@@ -34,12 +29,12 @@ def run_pipeline() -> None:
         for raw in raw_rides:
             # Upsert ride record
             ride = session.get(Ride, raw["id"]) or Ride(external_id=raw["id"])
-            ride.title = raw["title"]
-            ride.ride_date = raw["date"]
-            ride.pace = raw.get("pace", "")
+            ride.title       = raw["title"]
+            ride.ride_date   = raw["date"]
+            ride.pace        = raw.get("pace", "")
             ride.distance_km = raw.get("distance_km")
             ride.description = raw.get("description", "")
-            ride.rwgps_url = raw.get("rwgps_url", "")
+            ride.rwgps_url   = raw.get("rwgps_url", "") or ""
             session.add(ride)
 
             # Skip if already cached
@@ -48,28 +43,27 @@ def run_pipeline() -> None:
                 log.debug("Already cached: %s", ride.external_id)
                 continue
 
-            # Resolve RWGPS route ID
-            rwgps_id = raw.get("rwgps_id")  # direct from URL in description
+            # Resolve route
+            rwgps_id = raw.get("rwgps_id")
 
-            if not rwgps_id:
-                # Fallback: try fuzzy name match
+            if rwgps_id:
+                geojson = rwgps.fetch_route_by_id(rwgps_id)
+            else:
                 route_name = matcher.extract_route_name(raw["description"])
                 if not route_name:
                     log.warning("No route found for: %s", raw["title"])
                     continue
                 rwgps_id, geojson = rwgps.resolve_route(route_name)
-            else:
-                # We have the ID — fetch directly, no search needed
-                geojson = rwgps.fetch_route_by_id(rwgps_id)
 
             if not geojson:
                 log.warning("Could not fetch RWGPS route %s for: %s", rwgps_id, raw["title"])
                 continue
 
+            # Store as JSON string, not dict
             cache_entry = RouteCache(
                 ride_external_id=ride.external_id,
                 rwgps_route_id=rwgps_id,
-                geojson=geojson,
+                geojson=json.dumps(geojson),
             )
             session.add(cache_entry)
             log.info("Cached RWGPS route %s for: %s", rwgps_id, raw["title"])
