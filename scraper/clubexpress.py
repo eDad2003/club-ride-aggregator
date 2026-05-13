@@ -7,9 +7,6 @@ description, including (sometimes) a RideWithGPS URL.
 Filtering rules applied here:
   - Skip anything WITHOUT a ridewithgps.com URL in the description.
   - Skip anything marked CANCELED or CANCELLED in the link text.
-
-Page:  https://wcccpa.clubexpress.com/content.aspx?page_id=4001&club_id=939827
-Event: https://wcccpa.clubexpress.com/content.aspx?page_id=4091&club_id=939827&item_id=XXXXXXX
 """
 
 import logging
@@ -24,7 +21,8 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://wcccpa.clubexpress.com"
 CALENDAR_PATH = "/content.aspx"
-CALENDAR_PARAMS = {"page_id": "4001", "club_id": "939827"}
+CLUB_ID = "939827"
+PAGE_ID = "4001"
 
 # Matches ridewithgps.com/routes/XXXXXXX or /trips/XXXXXXX
 RWGPS_URL_RE = re.compile(
@@ -38,7 +36,6 @@ DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Pace/category label e.g. "B+", "A-", "Super B", "Gravel B+"
 PACE_RE = re.compile(r"\b(Super B|Gravel B[+-]?|A[+-]?|B[+-]?|C[+-]?)\b")
 
 
@@ -65,12 +62,25 @@ class ClubExpressScraper:
     def fetch_rides(self, since: datetime) -> list[dict]:
         """Return structured ride dicts for rides on/after `since` that
         have a RideWithGPS link and are not cancelled."""
-        html = self._fetch_calendar_html()
-        all_rides = self._parse_calendar(html)
+
+        # Fetch the months that overlap the lookback window.
+        # We need current month and possibly previous month.
+        months_to_fetch = self._months_in_range(since, datetime.now())
+        all_events = []
+        for view_date in months_to_fetch:
+            html = self._fetch_calendar_html(view_date)
+            all_events.extend(self._parse_calendar(html))
+
+        # Deduplicate by item_id (same event can appear on two month fetches)
+        seen = set()
+        unique = []
+        for e in all_events:
+            if e["id"] not in seen:
+                seen.add(e["id"])
+                unique.append(e)
 
         kept, skipped_date, skipped_no_rwgps, skipped_cancelled = [], 0, 0, 0
-
-        for ride in all_rides:
+        for ride in unique:
             if ride["cancelled"]:
                 skipped_cancelled += 1
             elif not ride["rwgps_id"]:
@@ -81,28 +91,52 @@ class ClubExpressScraper:
                 kept.append(ride)
 
         log.info(
-            "Calendar: %d total events → %d kept, %d cancelled, "
+            "Calendar: %d unique events → %d kept, %d cancelled, "
             "%d no RWGPS link, %d outside window",
-            len(all_rides), len(kept), skipped_cancelled,
+            len(unique), len(kept), skipped_cancelled,
             skipped_no_rwgps, skipped_date,
         )
         return kept
 
     # ── Private: fetch ───────────────────────────────────────────────
 
-    def _fetch_calendar_html(self) -> str:
-        resp = self._client.get(CALENDAR_PATH, params=CALENDAR_PARAMS)
+    def _fetch_calendar_html(self, view_date: datetime) -> str:
+        """Fetch the calendar for the month containing view_date."""
+        # ClubExpress uses vd=M/D/YYYY to set the viewed month
+        params = {
+            "page_id": PAGE_ID,
+            "club_id": CLUB_ID,
+            "action": "cira",
+            "vd": view_date.strftime("%-m/%-d/%Y") if os.name != "nt"
+                  else view_date.strftime("%#m/%#d/%Y"),  # Windows strftime
+        }
+        resp = self._client.get(CALENDAR_PATH, params=params)
         resp.raise_for_status()
-        log.info("Fetched calendar (%d bytes)", len(resp.content))
+        log.info(
+            "Fetched calendar for %s (%d bytes)",
+            view_date.strftime("%B %Y"), len(resp.content)
+        )
         return resp.text
+
+    @staticmethod
+    def _months_in_range(since: datetime, until: datetime) -> list[datetime]:
+        """Return one datetime per month between since and until."""
+        months = []
+        current = since.replace(day=1)
+        while current <= until:
+            months.append(current)
+            # Advance to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+        return months
 
     # ── Private: parse ───────────────────────────────────────────────
 
     def _parse_calendar(self, html: str) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
         rides = []
-
-        # Every calendar event links to page_id=4091
         for link in soup.find_all("a", href=re.compile(r"page_id=4091")):
             try:
                 ride = self._parse_event_link(link)
@@ -110,30 +144,25 @@ class ClubExpressScraper:
                     rides.append(ride)
             except Exception as exc:
                 log.warning("Skipping event — parse error: %s", exc)
-
         return rides
 
     def _parse_event_link(self, link) -> dict | None:
         href = link.get("href", "")
-        title_attr = link.get("title", "")  # full description is here
+        title_attr = link.get("title", "")
         link_text = link.get_text(strip=True)
 
-        # Need a stable item_id
         item_match = re.search(r"item_id=(\d+)", href)
         if not item_match:
             return None
         item_id = item_match.group(1)
 
-        # Cancelled check — look in both the link text and the title attr
         combined = f"{link_text} {title_attr}".upper()
         cancelled = "CANCELED" in combined or "CANCELLED" in combined
 
-        # RideWithGPS link — look in title attribute (the description)
         rwgps_match = RWGPS_URL_RE.search(title_attr)
         rwgps_url = rwgps_match.group(0) if rwgps_match else None
         rwgps_id = int(rwgps_match.group(2)) if rwgps_match else None
 
-        # Parse date/time from title attribute
         date_match = DATE_RE.search(title_attr)
         if not date_match:
             return None
@@ -145,11 +174,9 @@ class ClubExpressScraper:
         except ValueError:
             return None
 
-        # Description = everything after the datetime header
         description = title_attr[date_match.end():].strip()
         description = re.sub(r"^until \d{1,2}:\d{2} [AP]M\s*", "", description).strip()
 
-        # Pace category from link text
         pace_match = PACE_RE.search(link_text)
         pace = pace_match.group(0) if pace_match else ""
 
