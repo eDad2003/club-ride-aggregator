@@ -1,19 +1,16 @@
 /**
  * Club Ride Aggregator — Leaflet map
- *
- * Loads /api/map (GeoJSON FeatureCollection) and renders each route
- * as a coloured polyline. Clicking a sidebar item or a route on the
- * map pans to that route and opens a popup.
  */
 
-// ── Colour palette — one per route, cycles on overflow ──────────────
+// Red is reserved for the selected route — excluded from the palette
 const COLOURS = [
-  "#4285f4", "#ea4335", "#34a853", "#fbbc04",
-  "#9c27b0", "#00bcd4", "#ff5722", "#607d8b",
+  "#4285f4", "#34a853", "#fbbc04",
+  "#9c27b0", "#00bcd4", "#ff5722", "#607d8b", "#795548",
 ];
+const SELECTED_COLOUR = "#e53935";
 
 // ── Map init ─────────────────────────────────────────────────────────
-const map = L.map("map").setView([40.0, -75.5], 10);  // adjust default centre
+const map = L.map("map").setView([39.97, -75.6], 11);
 
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 18,
@@ -21,8 +18,9 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 }).addTo(map);
 
 // ── State ─────────────────────────────────────────────────────────────
-let activeLayer = null;
-const routeLayers = {};   // ride_id → Leaflet polyline layer
+let activeLayer    = null;
+let activeColour   = null;
+const routeLayers  = {};   // ride_id → { layer, colour }
 
 // ── Load data ─────────────────────────────────────────────────────────
 async function loadMap() {
@@ -44,6 +42,22 @@ function renderSidebar(rides, geojson) {
     geojson.features.map(f => f.properties?.id).filter(Boolean)
   );
 
+  // Date range subtitle
+  const dates = rides
+    .map(r => r.date ? new Date(r.date) : null)
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+
+  if (dates.length) {
+    const fmt = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const earliest = dates[0];
+    const latest   = dates[dates.length - 1];
+    const subtitle = earliest.toDateString() === latest.toDateString()
+      ? fmt(earliest)
+      : `${fmt(earliest)} – ${fmt(latest)}`;
+    document.getElementById("date-range").textContent = subtitle;
+  }
+
   const list = document.getElementById("ride-list");
   list.innerHTML = "";
 
@@ -63,7 +77,7 @@ function renderSidebar(rides, geojson) {
 
     el.innerHTML = `
       <div class="ride-title">${ride.title}</div>
-      <div class="ride-meta">${date}${dist ? " · " + dist : ""}${ride.leader ? " · " + ride.leader : ""}</div>
+      <div class="ride-meta">${date}${dist ? " · " + dist : ""}${ride.pace ? " · " + ride.pace : ""}</div>
     `;
 
     if (hasRoute) {
@@ -81,32 +95,44 @@ function renderRoutes(geojson) {
 
     const colour = COLOURS[idx % COLOURS.length];
     const rideId = feature.properties?.id;
+    const p      = feature.properties || {};
 
     const coords = feature.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-    const layer = L.polyline(coords, {
-      color: colour,
-      weight: 4,
+    const layer  = L.polyline(coords, {
+      color:   colour,
+      weight:  4,
       opacity: 0.75,
     }).addTo(map);
 
-    const p = feature.properties || {};
+    const rwgpsId  = p.rwgps_id
+                  || (p.rwgps_url ? p.rwgps_url.match(/(\d+)\/?$/)?.[1] : null);
+    const rwgpsUrl = p.rwgps_url
+                  || (rwgpsId ? `https://ridewithgps.com/routes/${rwgpsId}` : null);
+
+    const date      = p.date ? new Date(p.date).toLocaleDateString() : "";
+    const dist      = p.distance_km ? ` · ${p.distance_km.toFixed(1)} km` : "";
+    const pace      = p.pace ? ` · ${p.pace}` : "";
+    const rwgpsLink = rwgpsUrl
+      ? `<br><a href="${rwgpsUrl}" target="_blank" rel="noopener"
+              style="color:#4285f4;font-size:12px;">View on RideWithGPS ↗</a>`
+      : "";
+
     layer.bindPopup(`
-      <strong>${p.title || p.name || "Route"}</strong><br>
-      ${p.date ? new Date(p.date).toLocaleDateString() : ""}
-      ${p.distance_km ? " · " + p.distance_km.toFixed(1) + " km" : ""}
-      ${p.leader ? "<br>Leader: " + p.leader : ""}
-    `);
+      <strong style="font-size:13px;">${p.title || p.name || "Route"}</strong><br>
+      <span style="color:#666;font-size:12px;">${date}${dist}${pace}</span>
+      ${rwgpsLink}
+    `, { maxWidth: 300 });
 
     layer.on("click", () => {
       const sidebarEl = document.querySelector(`.ride-item[data-id="${rideId}"]`);
       if (sidebarEl) focusRide(rideId, sidebarEl, false);
     });
 
-    if (rideId) routeLayers[rideId] = layer;
+    if (rideId) routeLayers[rideId] = { layer, colour };
   });
 
   // Zoom to fit all routes
-  const allLayers = Object.values(routeLayers);
+  const allLayers = Object.values(routeLayers).map(e => e.layer);
   if (allLayers.length) {
     const group = L.featureGroup(allLayers);
     map.fitBounds(group.getBounds().pad(0.1));
@@ -117,20 +143,26 @@ function renderRoutes(geojson) {
 function focusRide(rideId, sidebarEl, panMap = true) {
   // Deactivate previous
   document.querySelectorAll(".ride-item.active").forEach(el => el.classList.remove("active"));
-  if (activeLayer) activeLayer.setStyle({ weight: 4, opacity: 0.75 });
+  if (activeLayer) {
+    activeLayer.setStyle({ color: activeColour, weight: 4, opacity: 0.75 });
+  }
 
   // Activate new
   sidebarEl.classList.add("active");
   sidebarEl.scrollIntoView({ block: "nearest" });
 
-  const layer = routeLayers[rideId];
-  if (!layer) return;
+  const entry = routeLayers[rideId];
+  if (!entry) return;
 
-  layer.setStyle({ weight: 6, opacity: 1 });
-  layer.openPopup();
-  activeLayer = layer;
+  // Store original colour so we can restore it on deselect
+  activeLayer  = entry.layer;
+  activeColour = entry.colour;
 
-  if (panMap) map.fitBounds(layer.getBounds().pad(0.1));
+  entry.layer.setStyle({ color: SELECTED_COLOUR, weight: 6, opacity: 1 });
+  entry.layer.bringToFront();
+  entry.layer.openPopup();
+
+  if (panMap) map.fitBounds(entry.layer.getBounds().pad(0.1));
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────

@@ -52,7 +52,7 @@ def main() -> None:
         month=month,
         day_of_week=day_of_week,
     )
-    log.info("Scheduler started. Next run: %s", scheduler.get_jobs()[0].next_run_time)
+    log.info("Scheduler started. Next run: %s", scheduler.get_jobs()[0].trigger)
     scheduler.start()
 
 

@@ -19,12 +19,23 @@ body {
   overflow: hidden;
 }
 
-#sidebar h1 {
-  font-size: 16px;
-  font-weight: 600;
-  padding: 16px;
+#sidebar-header {
+  padding: 14px 16px 12px;
   border-bottom: 1px solid #e0e0e0;
   background: #fff;
+}
+
+#sidebar-header h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-bottom: 3px;
+}
+
+#date-range {
+  font-size: 11px;
+  color: #888;
+  font-weight: 400;
 }
 
 #ride-list {
@@ -45,8 +56,8 @@ body {
 }
 
 .ride-item.active {
-  background: #e8f0fe;
-  border-left-color: #4285f4;
+  background: #fdecea;
+  border-left-color: #e53935;
 }
 
 .ride-item .ride-title {
@@ -60,7 +71,8 @@ body {
 }
 
 .ride-item.no-route {
-  opacity: 0.5;
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ── Map ── */

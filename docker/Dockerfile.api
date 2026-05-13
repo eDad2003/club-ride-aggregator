@@ -5,7 +5,12 @@ WORKDIR /app
 COPY api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Also install scraper deps (for db.py shared models)
+COPY scraper/requirements.txt scraper_requirements.txt
+RUN pip install --no-cache-dir -r scraper_requirements.txt
+
 COPY api/ ./api/
+COPY scraper/ ./scraper/
 COPY frontend/ ./frontend/
 
 ENV FLASK_APP=api.app

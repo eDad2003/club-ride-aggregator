@@ -74,6 +74,7 @@ def aggregated_map():
             feature = cache.get_geojson()
             ride = rides.get(cache.ride_external_id)
             if ride:
+                feature.setdefault("properties", {})["rwgps_id"] = cache.rwgps_route_id
                 feature.setdefault("properties", {}).update(ride.to_dict())
             features.append(feature)
 

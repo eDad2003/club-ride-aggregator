@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Club Ride Map</title>
+  <title>WCCC Club Rides</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="/static/css/map.css" />
 </head>
 <body>
   <div id="sidebar">
-    <h1>Club Rides</h1>
+    <div id="sidebar-header">
+      <h1>WCCC Club Rides</h1>
+      <p id="date-range"></p>
+    </div>
     <div id="ride-list">Loading rides…</div>
   </div>
   <div id="map"></div>
