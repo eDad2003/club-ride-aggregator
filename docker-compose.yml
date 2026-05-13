@@ -1,0 +1,31 @@
+services:
+
+  scraper:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.scraper
+    env_file: .env
+    volumes:
+      - db-data:/data
+      - ./scraper:/app/scraper   # live reload in dev
+    depends_on: []
+    restart: "no"                # scheduler runs inside the container
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    env_file: .env
+    volumes:
+      - db-data:/data
+      - ./api:/app/api           # live reload in dev
+      - ./frontend:/app/frontend
+    ports:
+      - "5000:5000"
+    depends_on:
+      - scraper
+    restart: unless-stopped
+
+volumes:
+  db-data:
+    driver: local

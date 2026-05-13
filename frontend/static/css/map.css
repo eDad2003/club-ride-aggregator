@@ -1,0 +1,69 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  display: flex;
+  height: 100vh;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: #333;
+}
+
+/* ── Sidebar ── */
+#sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e0e0e0;
+  background: #fafafa;
+  overflow: hidden;
+}
+
+#sidebar h1 {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 16px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fff;
+}
+
+#ride-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 8px 0;
+}
+
+.ride-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.15s;
+}
+
+.ride-item:hover {
+  background: #f0f0f0;
+}
+
+.ride-item.active {
+  background: #e8f0fe;
+  border-left-color: #4285f4;
+}
+
+.ride-item .ride-title {
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.ride-item .ride-meta {
+  color: #666;
+  font-size: 12px;
+}
+
+.ride-item.no-route {
+  opacity: 0.5;
+}
+
+/* ── Map ── */
+#map {
+  flex: 1;
+}
