@@ -1,12 +1,11 @@
 """ClubExpress scraper for West Chester Cycling Club.
 
-The public calendar is server-rendered HTML — no Playwright needed.
-Each event is an <a> tag whose `title` attribute contains the full
-description, including (sometimes) a RideWithGPS URL.
+Uses plain HTTP — no Playwright needed. The MonthGrid view returns
+all events for a month as server-rendered HTML with page_id=4091 links.
 
-Filtering rules applied here:
+Filtering rules:
   - Skip anything WITHOUT a ridewithgps.com URL in the description.
-  - Skip anything marked CANCELED or CANCELLED in the link text.
+  - Skip anything marked CANCELED or CANCELLED.
 """
 
 import logging
@@ -19,17 +18,15 @@ from bs4 import BeautifulSoup
 
 log = logging.getLogger(__name__)
 
-BASE_URL = "https://wcccpa.clubexpress.com"
+BASE_URL      = "https://wcccpa.clubexpress.com"
 CALENDAR_PATH = "/content.aspx"
-CLUB_ID = "939827"
-PAGE_ID = "4001"
+CLUB_ID       = "939827"
+PAGE_ID       = "4001"
 
-# Matches ridewithgps.com/routes/XXXXXXX or /trips/XXXXXXX
 RWGPS_URL_RE = re.compile(
     r"https?://ridewithgps\.com/(routes|trips)/(\d+)", re.IGNORECASE
 )
 
-# Parses "Monday, April 06, 2026, 5:35 PM until 7:00 PM" from title attr
 DATE_RE = re.compile(
     r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+"
     r"(\w+ \d{1,2}, \d{4}),\s+(\d{1,2}:\d{2} [AP]M)",
@@ -40,7 +37,6 @@ PACE_RE = re.compile(r"\b(Super B|Gravel B[+-]?|A[+-]?|B[+-]?|C[+-]?)\b")
 
 
 class ClubExpressScraper:
-    """Scrapes the WCCC ClubExpress calendar using plain HTTP (no browser needed)."""
 
     def __init__(self) -> None:
         self.base_url = os.getenv("CE_BASE_URL", BASE_URL).rstrip("/")
@@ -57,23 +53,17 @@ class ClubExpressScraper:
     def __exit__(self, *_):
         self._client.close()
 
-    # ── Public API ───────────────────────────────────────────────────
-
     def fetch_rides(self, since: datetime) -> list[dict]:
-        """Return structured ride dicts for rides on/after `since` that
-        have a RideWithGPS link and are not cancelled."""
+        """Return ride dicts on/after `since` that have a RWGPS link."""
+        now = datetime.now()
 
-        # Fetch the months that overlap the lookback window.
-        # We need current month and possibly previous month.
-        months_to_fetch = self._months_in_range(since, datetime.now())
+        # Fetch every month that overlaps the since→now window
         all_events = []
-        for view_date in months_to_fetch:
-            html = self._fetch_calendar_html(view_date)
-            all_events.extend(self._parse_calendar(html))
+        for offset in self._month_offsets(since, now):
+            all_events.extend(self._parse_calendar(self._fetch_month_grid(offset)))
 
-        # Deduplicate by item_id (same event can appear on two month fetches)
-        seen = set()
-        unique = []
+        # Deduplicate by ride id (same event can appear if months overlap)
+        seen, unique = set(), []
         for e in all_events:
             if e["id"] not in seen:
                 seen.add(e["id"])
@@ -98,41 +88,67 @@ class ClubExpressScraper:
         )
         return kept
 
-    # ── Private: fetch ───────────────────────────────────────────────
-
-    def _fetch_calendar_html(self, view_date: datetime) -> str:
-        """Fetch the calendar for the month containing view_date."""
-        # ClubExpress uses vd=M/D/YYYY to set the viewed month
-        params = {
-            "page_id": PAGE_ID,
-            "club_id": CLUB_ID,
-            "action": "cira",
-            "vd": view_date.strftime("%-m/%-d/%Y") if os.name != "nt"
-                  else view_date.strftime("%#m/%#d/%Y"),  # Windows strftime
-        }
-        resp = self._client.get(CALENDAR_PATH, params=params)
-        resp.raise_for_status()
-        log.info(
-            "Fetched calendar for %s (%d bytes)",
-            view_date.strftime("%B %Y"), len(resp.content)
-        )
-        return resp.text
+    # ── Helpers ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _months_in_range(since: datetime, until: datetime) -> list[datetime]:
-        """Return one datetime per month between since and until."""
-        months = []
-        current = since.replace(day=1)
-        while current <= until:
-            months.append(current)
-            # Advance to next month
-            if current.month == 12:
-                current = current.replace(year=current.year + 1, month=1)
-            else:
-                current = current.replace(month=current.month + 1)
-        return months
+    def _month_offsets(since: datetime, until: datetime) -> list[int]:
+        """Return month offsets (relative to current month) needed to
+        cover every month that overlaps the since→until date range.
 
-    # ── Private: parse ───────────────────────────────────────────────
+        Examples (today = May 13):
+          since=May 6  → [0]          (only May needed)
+          since=Apr 30 → [-1, 0]      (April + May)
+          since=May 28 → [0, 1]       (May + June, for a lookahead case)
+        """
+        now = datetime.now()
+        offsets = set()
+        cursor = since.replace(day=1)
+        end    = until.replace(day=1)
+        while cursor <= end:
+            diff = (cursor.year - now.year) * 12 + (cursor.month - now.month)
+            offsets.add(diff)
+            if cursor.month == 12:
+                cursor = cursor.replace(year=cursor.year + 1, month=1)
+            else:
+                cursor = cursor.replace(month=cursor.month + 1)
+        return sorted(offsets)
+
+    def _fetch_month_grid(self, offset: int = 0) -> str:
+        """Fetch the MonthGrid view for the month at `offset` from now.
+
+        offset=0  → current month
+        offset=-1 → previous month
+        offset=1  → next month
+        """
+        params: dict = {
+            "page_id": PAGE_ID,
+            "club_id": CLUB_ID,
+            "action":  "cira",
+            "vm":      "MonthGrid",
+        }
+
+        if offset != 0:
+            now   = datetime.now()
+            month = now.month + offset
+            year  = now.year + (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+            first = datetime(year, month, 1)
+            # ClubExpress uses V{ordinal} tokens for month navigation
+            params["_calAction"] = f"V{first.toordinal()}"
+
+        resp = self._client.get(CALENDAR_PATH, params=params)
+        resp.raise_for_status()
+
+        # Work out which month we fetched for the log message
+        now   = datetime.now()
+        month = now.month + offset
+        year  = now.year + (month - 1) // 12
+        month = ((month - 1) % 12) + 1
+        log.info(
+            "Fetched MonthGrid %d-%02d (%d bytes)",
+            year, month, len(resp.content),
+        )
+        return resp.text
 
     def _parse_calendar(self, html: str) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
@@ -147,21 +163,21 @@ class ClubExpressScraper:
         return rides
 
     def _parse_event_link(self, link) -> dict | None:
-        href = link.get("href", "")
+        href       = link.get("href", "")
         title_attr = link.get("title", "")
-        link_text = link.get_text(strip=True)
+        link_text  = link.get_text(strip=True)
 
         item_match = re.search(r"item_id=(\d+)", href)
         if not item_match:
             return None
         item_id = item_match.group(1)
 
-        combined = f"{link_text} {title_attr}".upper()
+        combined  = f"{link_text} {title_attr}".upper()
         cancelled = "CANCELED" in combined or "CANCELLED" in combined
 
         rwgps_match = RWGPS_URL_RE.search(title_attr)
-        rwgps_url = rwgps_match.group(0) if rwgps_match else None
-        rwgps_id = int(rwgps_match.group(2)) if rwgps_match else None
+        rwgps_url   = rwgps_match.group(0) if rwgps_match else None
+        rwgps_id    = int(rwgps_match.group(2)) if rwgps_match else None
 
         date_match = DATE_RE.search(title_attr)
         if not date_match:
@@ -181,22 +197,21 @@ class ClubExpressScraper:
         pace = pace_match.group(0) if pace_match else ""
 
         return {
-            "id": f"wccc-{item_id}",
-            "item_id": item_id,
-            "title": link_text,
-            "date": ride_dt,
-            "pace": pace,
+            "id":          f"wccc-{item_id}",
+            "item_id":     item_id,
+            "title":       link_text,
+            "date":        ride_dt,
+            "pace":        pace,
             "description": description,
-            "detail_url": f"{self.base_url}{href}" if href.startswith("/") else href,
-            "rwgps_url": rwgps_url,
-            "rwgps_id": rwgps_id,
+            "detail_url":  f"{self.base_url}{href}" if href.startswith("/") else href,
+            "rwgps_url":   rwgps_url,
+            "rwgps_id":    rwgps_id,
             "distance_km": None,
-            "cancelled": cancelled,
+            "cancelled":   cancelled,
         }
 
 
 def fetch_week_of_rides(since: datetime | None = None) -> list[dict]:
-    """Convenience function used by the pipeline."""
     if since is None:
         lookback = int(os.getenv("CE_LOOKBACK_DAYS", "7"))
         since = datetime.now() - timedelta(days=lookback)
