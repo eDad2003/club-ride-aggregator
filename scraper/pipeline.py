@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 import os
 
 from scraper.clubexpress import fetch_rides as ce_fetch
-from scraper.matcher import RouteMatcher
 from scraper.rwgps_client import RWGPSClient
 from scraper.db import get_session, Ride, RouteCache
 
@@ -44,7 +43,6 @@ def run_pipeline(
     log.info("Scraped %d rides in window", len(raw_rides))
 
     rwgps  = RWGPSClient()
-    matcher = RouteMatcher()
 
     with get_session() as session:
 
