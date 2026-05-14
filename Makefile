@@ -1,6 +1,6 @@
-.PHONY: dev build scrape logs shell-scraper shell-api export-geojson lint test clean
+.PHONY: dev build scrape logs shell export-geojson lint test clean
 
-# ── Docker Compose shortcuts ────────────────────────────────
+# ── Local dev ───────────────────────────────────────────────────────
 dev:
 	docker compose up --build
 
@@ -13,33 +13,31 @@ down:
 logs:
 	docker compose logs -f
 
-# ── One-off scrape ──────────────────────────────────────────
+# ── One-off scrape ──────────────────────────────────────────────────
 scrape:
-	docker compose run --rm scraper python -m scraper.main --once
+	docker compose run --rm app python -m scraper.main --once
 
-# ── Interactive shells ──────────────────────────────────────
-shell-scraper:
-	docker compose run --rm scraper bash
+scrape-refresh:
+	docker compose run --rm app python -m scraper.main --once --full-refresh
 
-shell-api:
-	docker compose run --rm api bash
+# ── Interactive shell ───────────────────────────────────────────────
+shell:
+	docker compose run --rm app bash
 
-# ── Export ──────────────────────────────────────────────────
+# ── Export ──────────────────────────────────────────────────────────
 export-geojson:
 	mkdir -p output
-	curl -s http://localhost:5000/api/map | python -m json.tool > output/rides.geojson
+	curl -s http://localhost:5003/api/map | python -m json.tool > output/rides.geojson
 	@echo "Wrote output/rides.geojson"
 
-# ── Dev quality ─────────────────────────────────────────────
+# ── Quality ─────────────────────────────────────────────────────────
 lint:
-	docker compose run --rm scraper ruff check .
-	docker compose run --rm api ruff check .
+	docker compose run --rm app ruff check scraper/ api/
 
 test:
-	docker compose run --rm scraper pytest tests/ -v
+	docker compose run --rm app pytest scraper/tests/ -v
 
-# ── Cleanup ──────────────────────────────────────────────────
+# ── Cleanup ─────────────────────────────────────────────────────────
 clean:
 	docker compose down -v --remove-orphans
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -name "*.pyc" -delete

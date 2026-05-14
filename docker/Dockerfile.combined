@@ -1,0 +1,28 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Supervisord to manage both processes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY scraper/requirements.txt scraper_requirements.txt
+COPY api/requirements.txt api_requirements.txt
+RUN pip install --no-cache-dir -r scraper_requirements.txt -r api_requirements.txt
+
+# Copy application code
+COPY scraper/ ./scraper/
+COPY api/ ./api/
+COPY frontend/ ./frontend/
+
+# Supervisord config
+COPY docker/supervisord.conf /etc/supervisor/conf.d/app.conf
+
+ENV FLASK_APP=api.app
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5003
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

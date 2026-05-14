@@ -1,29 +1,17 @@
+# Local development — builds the combined image locally
 services:
-
-  scraper:
+  app:
     build:
       context: .
-      dockerfile: docker/Dockerfile.scraper
+      dockerfile: docker/Dockerfile.combined
     env_file: .env
     volumes:
       - db-data:/data
-      - ./scraper:/app/scraper   # live reload in dev
-    depends_on: []
-    restart: "no"                # scheduler runs inside the container
-
-  api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.api
-    env_file: .env
-    volumes:
-      - db-data:/data
-      - ./api:/app/api           # live reload in dev
+      - ./scraper:/app/scraper     # live reload
+      - ./api:/app/api
       - ./frontend:/app/frontend
     ports:
-      - "5000:5000"
-    depends_on:
-      - scraper
+      - "5003:5003"
     restart: unless-stopped
 
 volumes:

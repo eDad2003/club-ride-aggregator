@@ -1,50 +1,65 @@
 # Club Ride Aggregator
 
-Scrapes a week's worth of club rides from ClubExpress, resolves each ride's
-route in RideWithGPS, and renders them all on a single interactive map.
+Scrapes a week's worth of WCCC club rides from ClubExpress, resolves each
+ride's route in RideWithGPS, and renders them all on a single interactive map.
 
 ## Stack
 
 | Layer | Technology |
 |---|---|
-| Scraper | Python · Playwright · BeautifulSoup4 |
-| Route matching | RapidFuzz · regex |
-| API client | httpx · RideWithGPS REST API |
+| Scraper | Python · httpx · BeautifulSoup4 |
+| Route matching | Direct RWGPS URL extraction |
+| API | Flask |
 | Storage | SQLite (Docker volume) |
-| Web API | Flask |
-| Map UI | Leaflet.js · plain HTML/CSS |
-| Orchestration | Docker Compose |
+| Map UI | Leaflet.js |
+| Process manager | Supervisord (combined container) |
+| Registry | GitHub Container Registry (ghcr.io) |
 
-## Quick start
+## Quick start (local)
 
 ```bash
 cp .env.example .env          # fill in your credentials
-make dev                      # build + start all services
-open http://localhost:5000     # view the map
+docker compose up --build     # build + start
+open http://localhost:5003
 ```
 
-## Development
+## Common commands
 
 ```bash
-make scrape                   # run the scraper once manually
-make shell-scraper            # bash into the scraper container
-make shell-api                # bash into the api container
-make logs                     # tail all container logs
-make export-geojson           # dump aggregated GeoJSON to ./output/
+docker compose run --rm app python -m scraper.main --once           # one scrape
+docker compose run --rm app python -m scraper.main --once --full-refresh  # force refresh
+docker compose run --rm -v ${PWD}/scripts:/app/scripts app \
+  python scripts/refresh_range.py --since 2026-05-01 --until 2026-05-07
 ```
 
-## Project layout
+## Deployment (Portainer)
 
-```
-club-ride-aggregator/
-├── scraper/          # ClubExpress scraper + route matcher
-├── api/              # Flask REST API
-├── frontend/         # Static HTML + Leaflet map
-├── docker/           # Dockerfiles
-├── scripts/          # Helper shell scripts
-└── .github/          # CI workflow
-```
+The CI pipeline builds and pushes `ghcr.io/edad2003/club-ride-aggregator:latest`
+on every push to `main`.
 
-## Environment variables
+In Portainer:
+1. Stacks → Add Stack → Repository
+2. Repository URL: `https://github.com/eDad2003/club-ride-aggregator`
+3. Compose path: `docker-compose.portainer.yml`
+4. Set environment variables (see below)
+5. Deploy
 
-See `.env.example` for all required variables.
+### Required environment variables
+
+| Variable | Description |
+|---|---|
+| `CE_BASE_URL` | `https://wcccpa.clubexpress.com` |
+| `RWGPS_API_KEY` | Your RideWithGPS API key |
+| `FLASK_SECRET_KEY` | Any random string |
+
+### Optional environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `CE_LOOKBACK_DAYS` | `7` | Days of history to scrape |
+| `SCRAPE_SCHEDULE` | `0 6 * * 1` | Cron schedule (default: Monday 6am) |
+| `RWGPS_USER_ID` | — | Scope RWGPS searches to your club |
+
+## Port
+
+The app runs on **port 5003** in all environments.

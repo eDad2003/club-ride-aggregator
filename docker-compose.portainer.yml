@@ -1,0 +1,32 @@
+# Portainer stack file
+# In Portainer: Stacks → Add Stack → Repository
+# Set the compose path to: docker-compose.portainer.yml
+#
+# Required environment variables (set in Portainer stack env):
+#   CE_BASE_URL
+#   RWGPS_API_KEY
+#   FLASK_SECRET_KEY
+#   CE_LOOKBACK_DAYS   (optional, default 7)
+#   RWGPS_USER_ID      (optional)
+#   SCRAPE_SCHEDULE    (optional, default "0 6 * * 1")
+
+services:
+  club-rides:
+    image: ghcr.io/edad2003/club-ride-aggregator:latest
+    restart: unless-stopped
+    ports:
+      - "5003:5003"
+    volumes:
+      - club-rides-data:/data
+    environment:
+      - CE_BASE_URL=${CE_BASE_URL}
+      - RWGPS_API_KEY=${RWGPS_API_KEY}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - CE_LOOKBACK_DAYS=${CE_LOOKBACK_DAYS:-7}
+      - RWGPS_USER_ID=${RWGPS_USER_ID:-}
+      - SCRAPE_SCHEDULE=${SCRAPE_SCHEDULE:-0 6 * * 1}
+      - DATABASE_URL=sqlite:////data/rides.db
+
+volumes:
+  club-rides-data:
+    driver: local
