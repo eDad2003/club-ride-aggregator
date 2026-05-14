@@ -8,7 +8,6 @@ GET /api/map            → GeoJSON FeatureCollection of all cached routes
 GET /api/rides/<id>     → single ride + its route feature
 """
 
-import json
 import os
 import sys
 
