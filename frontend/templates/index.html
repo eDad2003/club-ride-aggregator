@@ -12,6 +12,17 @@
     <div id="sidebar-header">
       <h1>WCCC Club Rides</h1>
       <p id="date-range"></p>
+      <div id="range-selector">
+        <button class="range-btn active" data-range="week">1 Week</button>
+        <button class="range-btn" data-range="month">1 Month</button>
+        <button class="range-btn" data-range="custom">Custom</button>
+      </div>
+      <div id="custom-range">
+        <input type="date" id="from-date" />
+        <span class="range-sep">–</span>
+        <input type="date" id="to-date" />
+        <button id="apply-range">Apply</button>
+      </div>
     </div>
     <div id="ride-list">Loading rides…</div>
   </div>

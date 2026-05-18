@@ -21,6 +21,8 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 let activeLayer    = null;
 let activeColour   = null;
 const routeLayers  = {};   // ride_id → { layer, colour }
+let allRides       = [];
+let allGeojson     = null;
 
 // ── Load data ─────────────────────────────────────────────────────────
 async function loadMap() {
@@ -29,11 +31,12 @@ async function loadMap() {
     fetch("/api/rides"),
   ]);
 
-  const geojson = await mapResp.json();
-  const rides   = await ridesResp.json();
+  allGeojson = await mapResp.json();
+  allRides   = await ridesResp.json();
 
-  renderSidebar(rides, geojson);
-  renderRoutes(geojson);
+  renderSidebar(allRides, allGeojson);
+  renderRoutes(allGeojson);
+  initRangeSelector();
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────
@@ -41,22 +44,6 @@ function renderSidebar(rides, geojson) {
   const resolvedIds = new Set(
     geojson.features.map(f => f.properties?.id).filter(Boolean)
   );
-
-  // Date range subtitle
-  const dates = rides
-    .map(r => r.date ? new Date(r.date) : null)
-    .filter(Boolean)
-    .sort((a, b) => a - b);
-
-  if (dates.length) {
-    const fmt = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    const earliest = dates[0];
-    const latest   = dates[dates.length - 1];
-    const subtitle = earliest.toDateString() === latest.toDateString()
-      ? fmt(earliest)
-      : `${fmt(earliest)} – ${fmt(latest)}`;
-    document.getElementById("date-range").textContent = subtitle;
-  }
 
   const list = document.getElementById("ride-list");
   list.innerHTML = "";
@@ -86,6 +73,87 @@ function renderSidebar(rides, geojson) {
 
     list.appendChild(el);
   });
+}
+
+// ── Range selector ────────────────────────────────────────────────────
+function initRangeSelector() {
+  const maxDateStr = allRides
+    .map(r => r.date?.slice(0, 10))
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+
+  if (!maxDateStr) return;
+
+  applyRange(weekRange(maxDateStr));
+
+  document.querySelectorAll(".range-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".range-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const mode = btn.dataset.range;
+      if (mode === "custom") {
+        document.getElementById("custom-range").style.display = "flex";
+      } else {
+        document.getElementById("custom-range").style.display = "none";
+        applyRange(mode === "week" ? weekRange(maxDateStr) : monthRange(maxDateStr));
+      }
+    });
+  });
+
+  document.getElementById("apply-range").addEventListener("click", () => {
+    const from = document.getElementById("from-date").value;
+    const to   = document.getElementById("to-date").value;
+    if (from && to) applyRange({ from, to });
+  });
+}
+
+function weekRange(maxDateStr) {
+  const d = new Date(maxDateStr + "T12:00:00");
+  d.setDate(d.getDate() - 6);
+  return { from: d.toISOString().slice(0, 10), to: maxDateStr };
+}
+
+function monthRange(maxDateStr) {
+  const d = new Date(maxDateStr + "T12:00:00");
+  d.setDate(d.getDate() - 30);
+  return { from: d.toISOString().slice(0, 10), to: maxDateStr };
+}
+
+function applyRange({ from, to }) {
+  const fmt = s => new Date(s + "T12:00:00").toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+  document.getElementById("date-range").textContent =
+    from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`;
+
+  // Filter sidebar items
+  document.querySelectorAll(".ride-item[data-id]").forEach(el => {
+    const ride = allRides.find(r => r.id === el.dataset.id);
+    const d = ride?.date?.slice(0, 10);
+    el.style.display = (!d || (d >= from && d <= to)) ? "" : "none";
+  });
+
+  // Filter map layers
+  Object.entries(routeLayers).forEach(([rideId, entry]) => {
+    const ride = allRides.find(r => r.id === rideId);
+    const d = ride?.date?.slice(0, 10);
+    const inRange = d && d >= from && d <= to;
+
+    if (inRange) {
+      if (!map.hasLayer(entry.layer)) entry.layer.addTo(map);
+    } else {
+      if (map.hasLayer(entry.layer)) map.removeLayer(entry.layer);
+    }
+  });
+
+  // Deselect active ride if it was filtered out
+  if (activeLayer && !map.hasLayer(activeLayer)) {
+    document.querySelectorAll(".ride-item.active").forEach(el => el.classList.remove("active"));
+    activeLayer.setStyle({ color: activeColour, weight: 4, opacity: 0.75 });
+    activeLayer = null;
+    activeColour = null;
+  }
 }
 
 // ── Route polylines ───────────────────────────────────────────────────

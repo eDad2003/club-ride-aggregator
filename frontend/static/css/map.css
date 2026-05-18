@@ -38,6 +38,77 @@ body {
   font-weight: 400;
 }
 
+#range-selector {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.range-btn {
+  flex: 1;
+  padding: 4px 0;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #f5f5f5;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  color: #555;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.range-btn:hover {
+  background: #e8e8e8;
+}
+
+.range-btn.active {
+  background: #e53935;
+  border-color: #e53935;
+  color: #fff;
+  font-weight: 600;
+}
+
+#custom-range {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+#custom-range input[type="date"] {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 4px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.range-sep {
+  color: #888;
+  font-size: 12px;
+}
+
+#apply-range {
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: #e53935;
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#apply-range:hover {
+  background: #c62828;
+}
+
 #ride-list {
   overflow-y: auto;
   flex: 1;
