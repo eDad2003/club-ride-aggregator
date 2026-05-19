@@ -208,7 +208,14 @@ class ClubExpressScraper:
     def _fetch_detail_rwgps_id(self, detail_url: str) -> int | None:
         """Fetch the ride detail page and return the RWGPS route ID, or None."""
         try:
-            resp = self._client.get(detail_url)
+            resp = self._client.get(detail_url, follow_redirects=False)
+            if resp.is_redirect:
+                location = resp.headers.get("location", "?")
+                log.warning(
+                    "Detail page redirected — likely member-only content: %s → %s",
+                    detail_url, location,
+                )
+                return None
             resp.raise_for_status()
         except Exception as exc:
             log.warning("Could not fetch detail page %s: %s", detail_url, exc)
