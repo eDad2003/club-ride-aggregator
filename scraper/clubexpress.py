@@ -84,8 +84,8 @@ class ClubExpressScraper:
             if rwgps_id:
                 ride["rwgps_url"] = f"https://ridewithgps.com/routes/{rwgps_id}"
             rides.append(ride)
-            status = f"RWGPS={rwgps_id}" if rwgps_id else "no RWGPS link"
-            log.debug("%s — %s", ride["title"][:50], status)
+            status = f"RWGPS={rwgps_id} ({ride['rwgps_url']})" if rwgps_id else "no RWGPS link"
+            log.info("%s — %s", ride["title"][:60], status)
 
         with_route    = sum(1 for r in rides if r["rwgps_id"])
         without_route = len(rides) - with_route
@@ -146,6 +146,7 @@ class ClubExpressScraper:
                 if not ride:
                     continue
                 if ride["cancelled"]:
+                    log.info("Skipping cancelled: %s", ride["title"])
                     continue
                 if ride["date"] < since or ride["date"] > until:
                     continue

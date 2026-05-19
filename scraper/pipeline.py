@@ -69,13 +69,13 @@ def run_pipeline(
 
             # Skip rides with no RWGPS link — will retry on next scrape
             if not raw.get("rwgps_id"):
-                log.debug("No RWGPS link (yet): %s", raw["title"])
+                log.info("No RWGPS link (yet): %s — ride will be grayed out on map", raw["title"])
                 continue
 
             # Skip if already cached (and not a full refresh)
             cached = session.get(RouteCache, ride.external_id)
             if cached:
-                log.debug("Already cached: %s", ride.external_id)
+                log.info("Already cached: %s", ride.external_id)
                 continue
 
             # Fetch GeoJSON from RWGPS
