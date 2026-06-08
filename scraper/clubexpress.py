@@ -199,7 +199,7 @@ class ClubExpressScraper:
             "detail_url":  detail_url,
             "rwgps_url":   None,
             "rwgps_id":    None,
-            "distance_km": None,
+            "distance_mi": None,
             "cancelled":   cancelled,
         }
 

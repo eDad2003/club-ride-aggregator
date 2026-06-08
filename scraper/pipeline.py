@@ -62,7 +62,7 @@ def run_pipeline(
             ride.title       = raw["title"]
             ride.ride_date   = raw["date"]
             ride.pace        = raw.get("pace", "")
-            ride.distance_km = raw.get("distance_km")
+            ride.distance_mi = raw.get("distance_mi")
             ride.description = raw.get("description", "")
             ride.rwgps_url   = raw.get("rwgps_url") or ""
             session.add(ride)
@@ -87,6 +87,10 @@ def run_pipeline(
                     "Could not fetch RWGPS route %s for: %s", rwgps_id, raw["title"]
                 )
                 continue
+
+            distance_m = geojson.get("properties", {}).get("distance_m")
+            if distance_m:
+                ride.distance_mi = round(distance_m / 1609.34, 1)
 
             cache_entry = RouteCache(
                 ride_external_id=ride.external_id,

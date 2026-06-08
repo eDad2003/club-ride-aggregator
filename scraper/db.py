@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator
 
-from sqlalchemy import Column, String, Float, DateTime, Text, Integer, create_engine
+from sqlalchemy import Column, String, Float, DateTime, Text, Integer, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/rides.db")
@@ -32,7 +32,7 @@ class Ride(Base):
     title       = Column(String, nullable=False)
     ride_date   = Column(DateTime, nullable=False)
     pace        = Column(String, default="")          # e.g. "B+", "A-"
-    distance_km = Column(Float, nullable=True)
+    distance_mi = Column(Float, nullable=True)
     description = Column(Text, default="")
     rwgps_url   = Column(String, default="")          # direct URL if found
     scraped_at  = Column(DateTime, default=datetime.utcnow)
@@ -43,7 +43,7 @@ class Ride(Base):
             "title": self.title,
             "date": self.ride_date.isoformat() if self.ride_date else None,
             "pace": self.pace,
-            "distance_km": self.distance_km,
+            "distance_mi": self.distance_mi,
             "description": self.description,
             "rwgps_url": self.rwgps_url,
         }
@@ -64,9 +64,19 @@ class RouteCache(Base):
         self.geojson = json.dumps(data)
 
 
+def _migrate_db() -> None:
+    """Apply pending schema changes to an existing database."""
+    with engine.connect() as conn:
+        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(rides)"))]
+        if "distance_km" in cols and "distance_mi" not in cols:
+            conn.execute(text("ALTER TABLE rides RENAME COLUMN distance_km TO distance_mi"))
+            conn.commit()
+
+
 def init_db() -> None:
     """Create all tables if they don't exist."""
     Base.metadata.create_all(engine)
+    _migrate_db()
 
 
 @contextmanager

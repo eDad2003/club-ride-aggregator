@@ -60,7 +60,7 @@ function renderSidebar(rides, geojson) {
     el.dataset.id = ride.id;
 
     const date = ride.date ? new Date(ride.date).toLocaleDateString() : "—";
-    const dist = ride.distance_km ? `${ride.distance_km.toFixed(1)} km` : "";
+    const dist = ride.distance_mi ? `${ride.distance_mi.toFixed(1)} mi` : "";
 
     el.innerHTML = `
       <div class="ride-title">${ride.title}</div>
@@ -178,7 +178,7 @@ function renderRoutes(geojson) {
                   || (rwgpsId ? `https://ridewithgps.com/routes/${rwgpsId}` : null);
 
     const date      = p.date ? new Date(p.date).toLocaleDateString() : "";
-    const dist      = p.distance_km ? ` · ${p.distance_km.toFixed(1)} km` : "";
+    const dist      = p.distance_mi ? ` · ${p.distance_mi.toFixed(1)} mi` : "";
     const pace      = p.pace ? ` · ${p.pace}` : "";
     const rwgpsLink = rwgpsUrl
       ? `<br><a href="${rwgpsUrl}" target="_blank" rel="noopener"
