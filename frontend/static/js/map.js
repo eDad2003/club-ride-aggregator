@@ -61,10 +61,11 @@ function renderSidebar(rides, geojson) {
 
     const date = ride.date ? new Date(ride.date).toLocaleDateString() : "—";
     const dist = ride.distance_mi ? `${ride.distance_mi.toFixed(1)} mi` : "";
+    const elev = ride.elevation_gain_ft ? `${Math.round(ride.elevation_gain_ft).toLocaleString()}′` : "";
 
     el.innerHTML = `
       <div class="ride-title">${ride.title}</div>
-      <div class="ride-meta">${date}${dist ? " · " + dist : ""}${ride.pace ? " · " + ride.pace : ""}</div>
+      <div class="ride-meta">${date}${dist ? " · " + dist : ""}${elev ? " · " + elev : ""}${ride.pace ? " · " + ride.pace : ""}</div>
     `;
 
     if (hasRoute) {
@@ -127,6 +128,21 @@ function applyRange({ from, to }) {
   document.getElementById("date-range").textContent =
     from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`;
 
+  // Compute totals for visible rides
+  const visible = allRides.filter(r => {
+    const d = r.date?.slice(0, 10);
+    return d && d >= from && d <= to;
+  });
+  const totalDist = visible.reduce((s, r) => s + (r.distance_mi || 0), 0);
+  const totalElev = visible.reduce((s, r) => s + (r.elevation_gain_ft || 0), 0);
+
+  document.getElementById("summary-rides").textContent =
+    `${visible.length} ride${visible.length !== 1 ? "s" : ""}`;
+  const parts = [];
+  if (totalDist > 0) parts.push(`${totalDist.toFixed(1)} mi`);
+  if (totalElev > 0) parts.push(`${Math.round(totalElev).toLocaleString()}′`);
+  document.getElementById("summary-stats").textContent = parts.join(" · ");
+
   // Filter sidebar items
   document.querySelectorAll(".ride-item[data-id]").forEach(el => {
     const ride = allRides.find(r => r.id === el.dataset.id);
@@ -179,6 +195,7 @@ function renderRoutes(geojson) {
 
     const date      = p.date ? new Date(p.date).toLocaleDateString() : "";
     const dist      = p.distance_mi ? ` · ${p.distance_mi.toFixed(1)} mi` : "";
+    const elev      = p.elevation_gain_ft ? ` · ${Math.round(p.elevation_gain_ft).toLocaleString()}′` : "";
     const pace      = p.pace ? ` · ${p.pace}` : "";
     const rwgpsLink = rwgpsUrl
       ? `<br><a href="${rwgpsUrl}" target="_blank" rel="noopener"
@@ -187,7 +204,7 @@ function renderRoutes(geojson) {
 
     layer.bindPopup(`
       <strong style="font-size:13px;">${p.title || p.name || "Route"}</strong><br>
-      <span style="color:#666;font-size:12px;">${date}${dist}${pace}</span>
+      <span style="color:#666;font-size:12px;">${date}${dist}${elev}${pace}</span>
       ${rwgpsLink}
     `, { maxWidth: 300 });
 

@@ -88,9 +88,11 @@ def run_pipeline(
                 )
                 continue
 
-            distance_m = geojson.get("properties", {}).get("distance_m")
-            if distance_m:
-                ride.distance_mi = round(distance_m / 1609.34, 1)
+            props = geojson.get("properties", {})
+            if props.get("distance_m"):
+                ride.distance_mi = round(props["distance_m"] / 1609.34, 1)
+            if props.get("elevation_gain_m"):
+                ride.elevation_gain_ft = round(props["elevation_gain_m"] * 3.28084)
 
             cache_entry = RouteCache(
                 ride_external_id=ride.external_id,

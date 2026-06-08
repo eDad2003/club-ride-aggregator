@@ -32,7 +32,8 @@ class Ride(Base):
     title       = Column(String, nullable=False)
     ride_date   = Column(DateTime, nullable=False)
     pace        = Column(String, default="")          # e.g. "B+", "A-"
-    distance_mi = Column(Float, nullable=True)
+    distance_mi      = Column(Float, nullable=True)
+    elevation_gain_ft = Column(Float, nullable=True)
     description = Column(Text, default="")
     rwgps_url   = Column(String, default="")          # direct URL if found
     scraped_at  = Column(DateTime, default=datetime.utcnow)
@@ -44,6 +45,7 @@ class Ride(Base):
             "date": self.ride_date.isoformat() if self.ride_date else None,
             "pace": self.pace,
             "distance_mi": self.distance_mi,
+            "elevation_gain_ft": self.elevation_gain_ft,
             "description": self.description,
             "rwgps_url": self.rwgps_url,
         }
@@ -70,6 +72,9 @@ def _migrate_db() -> None:
         cols = [row[1] for row in conn.execute(text("PRAGMA table_info(rides)"))]
         if "distance_km" in cols and "distance_mi" not in cols:
             conn.execute(text("ALTER TABLE rides RENAME COLUMN distance_km TO distance_mi"))
+            conn.commit()
+        if "elevation_gain_ft" not in cols:
+            conn.execute(text("ALTER TABLE rides ADD COLUMN elevation_gain_ft REAL"))
             conn.commit()
 
 
