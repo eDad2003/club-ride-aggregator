@@ -47,6 +47,7 @@ club-ride-aggregator/
 │   └── refresh_range.py      # full cache refresh for a date range
 ├── docker-compose.yml            # local dev (combined image, port 5003)
 ├── docker-compose.portainer.yml  # Portainer production stack
+├── VERSION                       # semantic version (major.minor.patch) — bump before pushing
 ├── Makefile
 └── .github/workflows/ci.yml      # lint → test → build → push to ghcr.io
 ```
@@ -125,7 +126,7 @@ ignored. Navigation to a non-current month requires three steps:
 
 **rides** table:
 `external_id` (PK, format: `wccc-{item_id}`), `title`, `ride_date`,
-`pace` (e.g. "B+", "A-"), `distance_mi` (from RWGPS metadata), `description`, `rwgps_url`, `scraped_at`
+`pace` (e.g. "B+", "A-"), `distance_mi`, `elevation_gain_ft` (both from RWGPS metadata), `description`, `rwgps_url`, `scraped_at`
 
 **route_cache** table:
 `ride_external_id` (PK, FK → rides), `rwgps_route_id`, `geojson` (JSON string), `cached_at`
@@ -135,16 +136,32 @@ ignored. Navigation to a non-current month requires three steps:
 - `GET /api/rides` — JSON list of all rides (most recent first)
 - `GET /api/map` — GeoJSON FeatureCollection of all cached routes
 - `GET /api/rides/<id>` — single ride + its route GeoJSON
-- `GET /api/health` — `{"status": "ok"}`
+- `GET /api/health` — `{"status": "ok", "version": "x.y.z"}`
 
 ## Map UI features
 - Sidebar: "WCCC Club Rides" title + active date range subtitle
 - Date range selector: 1 Week / 1 Month / Custom — client-side filtering, no reload
+- Summary bar: ride count + total distance (mi) + total elevation (ft) for the selected range
 - Each route is a coloured polyline (red excluded from palette)
 - Selecting a route: turns red, brought to front, sidebar highlights
-- Popup: ride title, date, distance (mi), pace, "View on RideWithGPS ↗" link
+- Popup: ride title, date, distance (mi), elevation (ft), pace, "View on RideWithGPS ↗" link
 - Rides without a cached route shown at reduced opacity, not clickable
 - Auto-zooms to fit all routes on load
+- Version displayed in sidebar footer (matches `VERSION` file and `/api/health`)
+
+## Versioning
+
+The `VERSION` file at the repo root holds the current semantic version (`major.minor.patch`).
+Bump it manually before pushing:
+- **Patch** (`0.9.0` → `0.9.1`): bug fix
+- **Minor** (`0.9.1` → `0.10.0`): new feature
+- **Major** (`0.10.0` → `1.0.0`): breaking change
+
+The version is baked into the Docker image, returned by `/api/health`, and shown
+in the sidebar footer. Use it to confirm Portainer is running the build you expect.
+
+After a Portainer redeploy, do a **hard refresh** (`Ctrl+Shift+R`) in the browser —
+Flask static files are cached by the browser and won't update on a normal reload.
 
 ## Deployment (Portainer)
 
