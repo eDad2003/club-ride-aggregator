@@ -14,7 +14,10 @@ Filtering rules:
 import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+
+# ClubExpress calendar V-values are days since this epoch (not Python ordinal)
+_CE_EPOCH = date(2000, 1, 1)
 
 import httpx
 from bs4 import BeautifulSoup
@@ -129,56 +132,42 @@ class ClubExpressScraper:
         return resp.text
 
     def _navigate_to_month(self, year: int, month: int):
-        """Step through the MonthGrid AJAX calendar to reach the target month."""
+        """Fetch the MonthGrid AJAX fragment for a non-current month.
+
+        ClubExpress keeps calendar month in server session. We navigate by:
+        1. GET full page to harvest VIEWSTATE hidden fields
+        2. POST __doPostBack with V-value (days since 2000-01-01) → sets session month
+        3. GET the MonthGrid AJAX endpoint → now returns the target month
+
+        Confirmed: V9617 = May 1 2026 = (date(2026,5,1) - date(2000,1,1)).days
+        """
+        cal_action  = f"V{(date(year, month, 1) - _CE_EPOCH).days}"
+        page_params = {"page_id": PAGE_ID, "club_id": CLUB_ID}
         ajax_params = {"page_id": PAGE_ID, "club_id": CLUB_ID, "action": "cira", "vm": "MonthGrid"}
 
-        resp = self._client.get(CALENDAR_PATH, params=ajax_params)
-        resp.raise_for_status()
+        # Step 1: GET full page for VIEWSTATE
+        get_resp = self._client.get(CALENDAR_PATH, params=page_params)
+        get_resp.raise_for_status()
 
-        now     = datetime.now()
-        target  = year * 12 + month
-        current = now.year * 12 + now.month
+        soup = BeautifulSoup(get_resp.text, "html.parser")
+        form_data: dict[str, str] = {}
+        for inp in soup.find_all("input", type="hidden"):
+            name = inp.get("name", "")
+            if name:
+                form_data[name] = inp.get("value", "") or ""
 
-        for _ in range(abs(target - current)):
-            direction = "prev" if target < current else "next"
-            resp = self._step_month(resp.text, direction)
-            current += -1 if direction == "prev" else 1
+        # Step 2: POST to set server session to target month
+        form_data["__EVENTTARGET"]   = "ctl00$ctl00$calendar"
+        form_data["__EVENTARGUMENT"] = cal_action
+        log.info("Navigating to %d-%02d via POST (_calAction=%s, %d hidden fields)",
+                 year, month, cal_action, len(form_data))
+        post_resp = self._client.post(CALENDAR_PATH, params=page_params, data=form_data)
+        post_resp.raise_for_status()
 
-        return resp
-
-    def _step_month(self, html: str, direction: str):
-        """Follow the prev or next month navigation link inside MonthGrid HTML."""
-        soup = BeautifulSoup(html, "html.parser")
-
-        prev_labels = {"<", "‹", "«", "◄"}
-        next_labels = {">", "›", "»", "►"}
-        targets = prev_labels if direction == "prev" else next_labels
-
-        all_links = [(a.get_text(strip=True), a.get("href", "")[:100])
-                     for a in soup.find_all("a")]
-        log.warning("MonthGrid %s-nav: all links in page: %s", direction, all_links)
-
-        for a in soup.find_all("a"):
-            text = a.get_text(strip=True)
-            href = a.get("href", "")
-            if text not in targets or not href or href.startswith("javascript:"):
-                continue
-            url = href if href.startswith("http") else self.base_url + href
-            log.info("Following %s-month link: %s", direction, url)
-            nav_resp = self._client.get(url)
-            nav_resp.raise_for_status()
-            return nav_resp
-
-        log.error(
-            "No %s-month GET link found in MonthGrid — returning current month as fallback. "
-            "Rides from the target month will be missing.",
-            direction,
-        )
-        # Return a fresh current-month response rather than crashing the whole scrape
-        ajax_params = {"page_id": PAGE_ID, "club_id": CLUB_ID, "action": "cira", "vm": "MonthGrid"}
-        fallback = self._client.get(CALENDAR_PATH, params=ajax_params)
-        fallback.raise_for_status()
-        return fallback
+        # Step 3: GET MonthGrid AJAX — session now points to target month
+        ajax_resp = self._client.get(CALENDAR_PATH, params=ajax_params)
+        ajax_resp.raise_for_status()
+        return ajax_resp
 
     def _parse_calendar(self, html: str, since: datetime, until: datetime) -> list[dict]:
         soup  = BeautifulSoup(html, "html.parser")
