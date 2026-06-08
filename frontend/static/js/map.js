@@ -26,13 +26,19 @@ let allGeojson     = null;
 
 // ── Load data ─────────────────────────────────────────────────────────
 async function loadMap() {
-  const [mapResp, ridesResp] = await Promise.all([
+  const [mapResp, ridesResp, healthResp] = await Promise.all([
     fetch("/api/map"),
     fetch("/api/rides"),
+    fetch("/api/health"),
   ]);
 
   allGeojson = await mapResp.json();
   allRides   = await ridesResp.json();
+  const health = await healthResp.json();
+
+  const ver = health.version || "dev";
+  document.getElementById("version-footer").textContent =
+    ver === "dev" ? "dev" : ver.slice(0, 7);
 
   renderSidebar(allRides, allGeojson);
   renderRoutes(allGeojson);

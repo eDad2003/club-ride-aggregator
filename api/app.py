@@ -85,4 +85,4 @@ def aggregated_map():
 
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "version": os.getenv("APP_VERSION", "dev")})
