@@ -3,8 +3,10 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Supervisord to manage both processes
+# supervisor: process manager; sqlite3: allows ad-hoc SQL queries against rides.db in production
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
