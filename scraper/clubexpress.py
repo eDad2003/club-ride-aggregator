@@ -16,11 +16,11 @@ import os
 import re
 from datetime import date, datetime, timedelta
 
-# ClubExpress calendar V-values are days since this epoch (not Python ordinal)
-_CE_EPOCH = date(2000, 1, 1)
-
 import httpx
 from bs4 import BeautifulSoup
+
+# ClubExpress calendar V-values are days since this epoch (not Python ordinal)
+_CE_EPOCH = date(2000, 1, 1)
 
 log = logging.getLogger(__name__)
 
