@@ -26,10 +26,12 @@ open http://localhost:5003
 ## Common commands
 
 ```bash
-docker compose run --rm app python -m scraper.main --once           # one scrape
-docker compose run --rm app python -m scraper.main --once --full-refresh  # force refresh
-docker compose run --rm -v ${PWD}/scripts:/app/scripts app \
-  python scripts/refresh_range.py --since 2026-05-01 --until 2026-05-07
+docker compose run --rm app python -m scraper.main --once                                    # one scrape
+docker compose run --rm app python -m scraper.main --once --full-refresh                     # force refresh
+docker compose run --rm app python scripts/refresh_range.py --since 2026-05-01 --until 2026-05-07  # backfill range
+
+# Production (scripts/ is baked into the image)
+docker exec $(docker ps -q --filter name=club-rides) python scripts/refresh_range.py --since 2026-05-01 --until 2026-05-07
 ```
 
 ## Deployment (Portainer)
@@ -57,7 +59,7 @@ In Portainer:
 | Variable | Default | Description |
 |---|---|---|
 | `CE_LOOKBACK_DAYS` | `7` | Days of history to scrape |
-| `SCRAPE_SCHEDULE` | `0 6 * * 1` | Cron schedule (default: Monday 6am) |
+| `SCRAPE_SCHEDULE` | `0 14 * * sun` | Cron schedule (default: Sunday 2pm ET) |
 | `RWGPS_USER_ID` | — | Scope RWGPS searches to your club |
 
 ## Port

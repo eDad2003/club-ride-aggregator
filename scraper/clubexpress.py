@@ -119,27 +119,45 @@ class ClubExpressScraper:
             "action":  "cira",
             "vm":      "MonthGrid",
         }
-        if offset != 0:
-            now   = datetime.now()
-            month = now.month + offset
-            year  = now.year + (month - 1) // 12
-            month = ((month - 1) % 12) + 1
-            first = datetime(year, month, 1)
-            params["_calAction"] = f"V{first.toordinal()}"
 
-        resp = self._client.get(CALENDAR_PATH, params=params)
-        resp.raise_for_status()
+        now          = datetime.now()
+        target_month = now.month + offset
+        target_year  = now.year + (target_month - 1) // 12
+        target_month = ((target_month - 1) % 12) + 1
 
-        now   = datetime.now()
-        month = now.month + offset
-        year  = now.year + (month - 1) // 12
-        month = ((month - 1) % 12) + 1
-        log.info("Fetched MonthGrid %d-%02d (%d bytes)", year, month, len(resp.content))
+        if offset == 0:
+            resp = self._client.get(CALENDAR_PATH, params=params)
+            resp.raise_for_status()
+        else:
+            # ClubExpress is ASP.NET WebForms — calendar navigation requires a POST
+            # with the page's ViewState tokens. GET-only requests with _calAction
+            # are ignored and always return the current month.
+            first      = datetime(target_year, target_month, 1)
+            cal_action = f"V{first.toordinal()}"
+            log.info("Navigating to %d-%02d (_calAction=%s)", target_year, target_month, cal_action)
+
+            # Step 1: GET current month to obtain form state tokens
+            initial = self._client.get(CALENDAR_PATH, params=params)
+            initial.raise_for_status()
+            soup = BeautifulSoup(initial.text, "html.parser")
+
+            form_data: dict = {"_calAction": cal_action}
+            for field in ["__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"]:
+                el = soup.find("input", {"name": field})
+                if el:
+                    form_data[field] = el.get("value", "")
+
+            # Step 2: POST to navigate to target month
+            resp = self._client.post(CALENDAR_PATH, params=params, data=form_data)
+            resp.raise_for_status()
+
+        log.info("Fetched MonthGrid %d-%02d (%d bytes)", target_year, target_month, len(resp.content))
         return resp.text
 
     def _parse_calendar(self, html: str, since: datetime, until: datetime) -> list[dict]:
         soup  = BeautifulSoup(html, "html.parser")
         rides = []
+        total = 0
         for link in soup.find_all("a", href=re.compile(r"page_id=4091")):
             try:
                 ride = self._parse_event_link(link)
@@ -148,11 +166,15 @@ class ClubExpressScraper:
                 if ride["cancelled"]:
                     log.info("Skipping cancelled: %s", ride["title"])
                     continue
+                total += 1
                 if ride["date"] < since or ride["date"] > until:
+                    log.debug("Out of window (%s): %s", ride["date"].date(), ride["title"][:50])
                     continue
                 rides.append(ride)
             except Exception as exc:
                 log.warning("Skipping event — parse error: %s", exc)
+        log.info("Calendar page: %d events found, %d in window (%s → %s)",
+                 total, len(rides), since.date(), until.date())
         return rides
 
     def _parse_event_link(self, link) -> dict | None:
