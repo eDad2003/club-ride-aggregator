@@ -11,6 +11,7 @@ import argparse
 import logging
 import os
 
+import pytz
 from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 
@@ -38,10 +39,11 @@ def main() -> None:
         run_pipeline(full_refresh=args.full_refresh)
         return
 
-    schedule = os.getenv("SCRAPE_SCHEDULE", "0 6 * * 1")
+    schedule = os.getenv("SCRAPE_SCHEDULE", "0 14 * * sun")
     minute, hour, day, month, day_of_week = schedule.split()
 
-    scheduler = BlockingScheduler()
+    eastern = pytz.timezone("America/New_York")
+    scheduler = BlockingScheduler(timezone=eastern)
     scheduler.add_job(
         run_pipeline,
         trigger="cron",
