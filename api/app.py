@@ -83,6 +83,13 @@ def aggregated_map():
         })
 
 
+def _read_version() -> str:
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "../VERSION")) as f:
+            return f.read().strip()
+    except OSError:
+        return "unknown"
+
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "ok", "version": os.getenv("APP_VERSION", "dev")})
+    return jsonify({"status": "ok", "version": _read_version()})

@@ -21,8 +21,7 @@ COPY scripts/ ./scripts/
 # Supervisord config
 COPY docker/supervisord.conf /etc/supervisor/conf.d/app.conf
 
-ARG GIT_SHA=dev
-ENV APP_VERSION=${GIT_SHA}
+COPY VERSION ./VERSION
 ENV FLASK_APP=api.app
 ENV PYTHONUNBUFFERED=1
 
