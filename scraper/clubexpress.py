@@ -129,61 +129,56 @@ class ClubExpressScraper:
         return resp.text
 
     def _navigate_to_month(self, year: int, month: int):
-        """Navigate the ClubExpress calendar to a specific month.
+        """Step through the MonthGrid AJAX calendar to reach the target month."""
+        ajax_params = {"page_id": PAGE_ID, "club_id": CLUB_ID, "action": "cira", "vm": "MonthGrid"}
 
-        The AJAX endpoint (action=cira&vm=MonthGrid) doesn't accept POST — the
-        navigation form lives on the full calendar page. We GET that page to
-        collect ViewState tokens and the Calendar control ID, then POST back.
-        """
-        full_page_params = {"page_id": PAGE_ID, "club_id": CLUB_ID}
-        page_resp = self._client.get(CALENDAR_PATH, params=full_page_params)
-        page_resp.raise_for_status()
-        soup = BeautifulSoup(page_resp.text, "html.parser")
+        resp = self._client.get(CALENDAR_PATH, params=ajax_params)
+        resp.raise_for_status()
 
-        # Find the ASP.NET Calendar control ID from any prev/next nav link
-        cal_control = None
-        for a in soup.find_all("a", href=re.compile(r"__doPostBack")):
-            m = re.search(r"__doPostBack\('([^']+)','V\d+'", a.get("href", ""))
-            if m:
-                cal_control = m.group(1)
-                break
+        now     = datetime.now()
+        target  = year * 12 + month
+        current = now.year * 12 + now.month
 
-        first          = datetime(year, month, 1)
-        event_argument = f"V{first.toordinal()}"
+        for _ in range(abs(target - current)):
+            direction = "prev" if target < current else "next"
+            resp = self._step_month(resp.text, direction)
+            current += -1 if direction == "prev" else 1
 
-        if cal_control:
-            log.info("Navigating to %d-%02d via postback (control=%s, arg=%s)",
-                     year, month, cal_control, event_argument)
-        else:
-            log.warning(
-                "Calendar control ID not found in HTML — navigation may fail. "
-                "Nav links on page: %s",
-                [(a.get_text(strip=True), a.get("href", "")[:80])
-                 for a in soup.find_all("a")
-                 if "_calAction" in a.get("href", "") or "__doPostBack" in a.get("href", "")]
-            )
-            cal_control = ""
+        return resp
 
-        post_data: dict = {
-            "__EVENTTARGET":   cal_control,
-            "__EVENTARGUMENT": event_argument,
-        }
-        for field in ["__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"]:
-            el = soup.find("input", {"name": field})
-            if el:
-                post_data[field] = el.get("value", "")
+    def _step_month(self, html: str, direction: str):
+        """Follow the prev or next month navigation link inside MonthGrid HTML."""
+        soup = BeautifulSoup(html, "html.parser")
 
-        # POST to the form's own action URL, not the AJAX endpoint
-        form    = soup.find("form")
-        action  = form.get("action") if form else None
-        if action and not action.startswith("http"):
-            action = self.base_url + ("" if action.startswith("/") else "/") + action
-        if not action:
-            action = f"{self.base_url}{CALENDAR_PATH}?page_id={PAGE_ID}&club_id={CLUB_ID}"
+        prev_labels = {"<", "‹", "«", "◄"}
+        next_labels = {">", "›", "»", "►"}
+        targets = prev_labels if direction == "prev" else next_labels
 
-        nav_resp = self._client.post(action, data=post_data)
-        nav_resp.raise_for_status()
-        return nav_resp
+        all_links = [(a.get_text(strip=True), a.get("href", "")[:100])
+                     for a in soup.find_all("a")]
+        log.warning("MonthGrid %s-nav: all links in page: %s", direction, all_links)
+
+        for a in soup.find_all("a"):
+            text = a.get_text(strip=True)
+            href = a.get("href", "")
+            if text not in targets or not href or href.startswith("javascript:"):
+                continue
+            url = href if href.startswith("http") else self.base_url + href
+            log.info("Following %s-month link: %s", direction, url)
+            nav_resp = self._client.get(url)
+            nav_resp.raise_for_status()
+            return nav_resp
+
+        log.error(
+            "No %s-month GET link found in MonthGrid — returning current month as fallback. "
+            "Rides from the target month will be missing.",
+            direction,
+        )
+        # Return a fresh current-month response rather than crashing the whole scrape
+        ajax_params = {"page_id": PAGE_ID, "club_id": CLUB_ID, "action": "cira", "vm": "MonthGrid"}
+        fallback = self._client.get(CALENDAR_PATH, params=ajax_params)
+        fallback.raise_for_status()
+        return fallback
 
     def _parse_calendar(self, html: str, since: datetime, until: datetime) -> list[dict]:
         soup  = BeautifulSoup(html, "html.parser")
