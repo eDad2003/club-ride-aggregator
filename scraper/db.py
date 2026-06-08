@@ -77,6 +77,32 @@ def _migrate_db() -> None:
             conn.execute(text("ALTER TABLE rides ADD COLUMN elevation_gain_ft REAL"))
             conn.commit()
 
+        # Backfill distance_mi / elevation_gain_ft from already-cached GeoJSON.
+        # Runs once per ride that has a cached route but null metric columns.
+        rows = conn.execute(text(
+            "SELECT r.external_id, rc.geojson "
+            "FROM rides r JOIN route_cache rc ON rc.ride_external_id = r.external_id "
+            "WHERE rc.geojson IS NOT NULL "
+            "  AND (r.distance_mi IS NULL OR r.elevation_gain_ft IS NULL)"
+        )).fetchall()
+        for ride_id, geojson_str in rows:
+            try:
+                props = json.loads(geojson_str).get("properties", {})
+                dist_m = props.get("distance_m")
+                elev_m = props.get("elevation_gain_m")
+                if dist_m:
+                    conn.execute(text(
+                        "UPDATE rides SET distance_mi = :v WHERE external_id = :id"
+                    ), {"v": round(dist_m / 1609.34, 1), "id": ride_id})
+                if elev_m:
+                    conn.execute(text(
+                        "UPDATE rides SET elevation_gain_ft = :v WHERE external_id = :id"
+                    ), {"v": round(elev_m * 3.28084), "id": ride_id})
+            except Exception:
+                pass
+        if rows:
+            conn.commit()
+
 
 def init_db() -> None:
     """Create all tables if they don't exist."""
