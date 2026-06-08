@@ -113,46 +113,77 @@ class ClubExpressScraper:
         return unique
 
     def _fetch_month_grid(self, offset: int = 0) -> str:
-        params: dict = {
-            "page_id": PAGE_ID,
-            "club_id": CLUB_ID,
-            "action":  "cira",
-            "vm":      "MonthGrid",
-        }
-
         now          = datetime.now()
         target_month = now.month + offset
         target_year  = now.year + (target_month - 1) // 12
         target_month = ((target_month - 1) % 12) + 1
 
         if offset == 0:
+            params = {"page_id": PAGE_ID, "club_id": CLUB_ID, "action": "cira", "vm": "MonthGrid"}
             resp = self._client.get(CALENDAR_PATH, params=params)
             resp.raise_for_status()
         else:
-            # ClubExpress is ASP.NET WebForms — calendar navigation requires a POST
-            # with the page's ViewState tokens. GET-only requests with _calAction
-            # are ignored and always return the current month.
-            first      = datetime(target_year, target_month, 1)
-            cal_action = f"V{first.toordinal()}"
-            log.info("Navigating to %d-%02d (_calAction=%s)", target_year, target_month, cal_action)
-
-            # Step 1: GET current month to obtain form state tokens
-            initial = self._client.get(CALENDAR_PATH, params=params)
-            initial.raise_for_status()
-            soup = BeautifulSoup(initial.text, "html.parser")
-
-            form_data: dict = {"_calAction": cal_action}
-            for field in ["__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"]:
-                el = soup.find("input", {"name": field})
-                if el:
-                    form_data[field] = el.get("value", "")
-
-            # Step 2: POST to navigate to target month
-            resp = self._client.post(CALENDAR_PATH, params=params, data=form_data)
-            resp.raise_for_status()
+            resp = self._navigate_to_month(target_year, target_month)
 
         log.info("Fetched MonthGrid %d-%02d (%d bytes)", target_year, target_month, len(resp.content))
         return resp.text
+
+    def _navigate_to_month(self, year: int, month: int):
+        """Navigate the ClubExpress calendar to a specific month.
+
+        The AJAX endpoint (action=cira&vm=MonthGrid) doesn't accept POST — the
+        navigation form lives on the full calendar page. We GET that page to
+        collect ViewState tokens and the Calendar control ID, then POST back.
+        """
+        full_page_params = {"page_id": PAGE_ID, "club_id": CLUB_ID}
+        page_resp = self._client.get(CALENDAR_PATH, params=full_page_params)
+        page_resp.raise_for_status()
+        soup = BeautifulSoup(page_resp.text, "html.parser")
+
+        # Find the ASP.NET Calendar control ID from any prev/next nav link
+        cal_control = None
+        for a in soup.find_all("a", href=re.compile(r"__doPostBack")):
+            m = re.search(r"__doPostBack\('([^']+)','V\d+'", a.get("href", ""))
+            if m:
+                cal_control = m.group(1)
+                break
+
+        first          = datetime(year, month, 1)
+        event_argument = f"V{first.toordinal()}"
+
+        if cal_control:
+            log.info("Navigating to %d-%02d via postback (control=%s, arg=%s)",
+                     year, month, cal_control, event_argument)
+        else:
+            log.warning(
+                "Calendar control ID not found in HTML — navigation may fail. "
+                "Nav links on page: %s",
+                [(a.get_text(strip=True), a.get("href", "")[:80])
+                 for a in soup.find_all("a")
+                 if "_calAction" in a.get("href", "") or "__doPostBack" in a.get("href", "")]
+            )
+            cal_control = ""
+
+        post_data: dict = {
+            "__EVENTTARGET":   cal_control,
+            "__EVENTARGUMENT": event_argument,
+        }
+        for field in ["__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"]:
+            el = soup.find("input", {"name": field})
+            if el:
+                post_data[field] = el.get("value", "")
+
+        # POST to the form's own action URL, not the AJAX endpoint
+        form    = soup.find("form")
+        action  = form.get("action") if form else None
+        if action and not action.startswith("http"):
+            action = self.base_url + ("" if action.startswith("/") else "/") + action
+        if not action:
+            action = f"{self.base_url}{CALENDAR_PATH}?page_id={PAGE_ID}&club_id={CLUB_ID}"
+
+        nav_resp = self._client.post(action, data=post_data)
+        nav_resp.raise_for_status()
+        return nav_resp
 
     def _parse_calendar(self, html: str, since: datetime, until: datetime) -> list[dict]:
         soup  = BeautifulSoup(html, "html.parser")
