@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r scraper_requirements.txt -r api_requirements.t
 COPY scraper/ ./scraper/
 COPY api/ ./api/
 COPY frontend/ ./frontend/
+COPY scripts/ ./scripts/
 
 # Supervisord config
 COPY docker/supervisord.conf /etc/supervisor/conf.d/app.conf

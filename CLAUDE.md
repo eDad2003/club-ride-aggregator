@@ -76,11 +76,14 @@ docker compose run --rm app python -m scraper.main --once
 docker compose run --rm app python -m scraper.main --once --full-refresh
 
 # Debug — list all events in the lookback window
-docker compose run --rm -v ${PWD}/scripts:/app/scripts app python scripts/debug_calendar.py
+docker compose run --rm app python scripts/debug_calendar.py
 
 # Force refresh a specific date range
-docker compose run --rm -v ${PWD}/scripts:/app/scripts app `
-  python scripts/refresh_range.py --since 2026-05-01 --until 2026-05-07
+docker compose run --rm app python scripts/refresh_range.py --since 2026-05-01 --until 2026-05-07
+
+# Production equivalents (scripts/ is baked into the image)
+docker exec $(docker ps -q --filter name=club-rides) python scripts/debug_calendar.py
+docker exec $(docker ps -q --filter name=club-rides) python scripts/refresh_range.py --since 2026-05-01 --until 2026-05-07
 
 # Export aggregated GeoJSON
 curl http://localhost:5003/api/map > output/rides.geojson

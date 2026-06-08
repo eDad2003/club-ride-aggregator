@@ -24,7 +24,7 @@ services:
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - CE_LOOKBACK_DAYS=${CE_LOOKBACK_DAYS:-7}
       - RWGPS_USER_ID=${RWGPS_USER_ID:-}
-      - SCRAPE_SCHEDULE=${SCRAPE_SCHEDULE:-0 6 * * 1}
+      - SCRAPE_SCHEDULE=${SCRAPE_SCHEDULE:-0 14 * * sun}
       - DATABASE_URL=sqlite:////data/rides.db
 
 volumes:
