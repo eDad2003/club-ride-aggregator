@@ -60,7 +60,7 @@ Copy `.env.example` to `.env` and fill in:
 | `RWGPS_API_KEY` | Yes | RideWithGPS API key |
 | `FLASK_SECRET_KEY` | Yes | Any random string |
 | `CE_LOOKBACK_DAYS` | No | Days of history to scrape (default 7) |
-| `SCRAPE_SCHEDULE` | No | Cron expression (default `0 6 * * 1`, Monday 6am) |
+| `SCRAPE_SCHEDULE` | No | Cron expression (default `0 14 * * sun`, Sunday 2pm ET) |
 | `RWGPS_USER_ID` | No | Scope RWGPS searches to your club |
 | `DATABASE_URL` | No | SQLite path (default `sqlite:////data/rides.db`) |
 
@@ -97,6 +97,18 @@ curl http://localhost:5003/api/map > output/rides.geojson
 - Filters out: cancelled rides, future rides, events outside the window
 - ClubExpress URLs: page_id=4001 (calendar), page_id=4091 (event detail)
 
+#### Cross-month navigation (important)
+ClubExpress tracks the displayed calendar month in **server-side session state**.
+The AJAX MonthGrid endpoint (`action=cira&vm=MonthGrid`) always returns the
+current session month — passing `_calAction` as a GET parameter is silently
+ignored. Navigation to a non-current month requires three steps:
+
+1. GET `content.aspx?page_id=4001&club_id=939827` — full page, harvests VIEWSTATE
+2. POST to the same URL with `__EVENTTARGET=ctl00$ctl00$calendar` and
+   `__EVENTARGUMENT=V{N}` where N = `(date(year, month, 1) - date(2000, 1, 1)).days`
+   (e.g. May 1 2026 → V9617). This sets the server session month.
+3. GET the MonthGrid AJAX endpoint — now returns the target month's data.
+
 ### Phase 2 — Detail pages
 - Fetches each ride's detail page (`page_id=4091&item_id=XXXXX`)
 - Searches for RideWithGPS URL in two forms:
@@ -113,7 +125,7 @@ curl http://localhost:5003/api/map > output/rides.geojson
 
 **rides** table:
 `external_id` (PK, format: `wccc-{item_id}`), `title`, `ride_date`,
-`pace` (e.g. "B+", "A-"), `distance_km`, `description`, `rwgps_url`, `scraped_at`
+`pace` (e.g. "B+", "A-"), `distance_mi` (from RWGPS metadata), `description`, `rwgps_url`, `scraped_at`
 
 **route_cache** table:
 `ride_external_id` (PK, FK → rides), `rwgps_route_id`, `geojson` (JSON string), `cached_at`
@@ -126,10 +138,11 @@ curl http://localhost:5003/api/map > output/rides.geojson
 - `GET /api/health` — `{"status": "ok"}`
 
 ## Map UI features
-- Sidebar: "WCCC Club Rides" title + date range subtitle
+- Sidebar: "WCCC Club Rides" title + active date range subtitle
+- Date range selector: 1 Week / 1 Month / Custom — client-side filtering, no reload
 - Each route is a coloured polyline (red excluded from palette)
 - Selecting a route: turns red, brought to front, sidebar highlights
-- Popup: ride title, date, distance, pace, "View on RideWithGPS ↗" link
+- Popup: ride title, date, distance (mi), pace, "View on RideWithGPS ↗" link
 - Rides without a cached route shown at reduced opacity, not clickable
 - Auto-zooms to fit all routes on load
 
@@ -149,7 +162,9 @@ Portainer setup:
 ## Known limitations / future work
 - Rides posted without a RWGPS link won't appear on the map until the
   leader adds one and the scraper runs again
+- Member-only rides (those that 302-redirect to the login wall) cannot have
+  their detail pages scraped; they will be grayed out on the map
 - The fuzzy matcher (RapidFuzz) is a fallback but rarely used since most
   WCCC rides embed the RWGPS URL directly on the detail page
-- Distance (km) is not available from ClubExpress — would need to be
-  pulled from the RWGPS route metadata
+- The scheduler runs in America/New_York timezone (APScheduler + pytz);
+  `SCRAPE_SCHEDULE` uses APScheduler cron syntax where `sun` = Sunday
